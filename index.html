@@ -166,9 +166,9 @@ function load(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v)
 
 // ---------- map ----------
 const map = L.map('map', {zoomControl:false, attributionControl:true}).setView([32.0700, 34.7800], 13);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-  maxZoom: 19, subdomains:'abcd',
-  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '&copy; OpenStreetMap contributors'
 }).addTo(map);
 L.control.zoom({position:'bottomleft'}).addTo(map);
 const layerPeople = L.layerGroup().addTo(map);
