@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>באמצע · מקום מפגש הוגן</title>
+<meta name="theme-color" content="#0f172a">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+  :root{
+    --bg:#f6f5f2; --card:#ffffff; --ink:#14181f; --muted:#6b7280; --line:#e6e3dc;
+    --accent:#ff5a36; --accent-ink:#ffffff; --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+    --radius:16px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:Rubik,system-ui,sans-serif;-webkit-tap-highlight-color:transparent}
+  header{position:sticky;top:0;z-index:1000;background:var(--ink);color:#fff;padding:calc(10px + env(safe-area-inset-top)) 16px 10px;display:flex;align-items:center;justify-content:space-between}
+  header h1{margin:0;font-size:20px;font-weight:700;letter-spacing:.2px}
+  header h1 span{color:var(--accent)}
+  header .sub{font-size:12px;color:#cbd5e1}
+  #map{height:38vh;min-height:240px;width:100%;direction:ltr;border-bottom:1px solid var(--line)}
+  #map.picking{outline:4px solid var(--accent);outline-offset:-4px}
+  main{padding:14px 14px calc(40px + env(safe-area-inset-bottom));max-width:640px;margin:0 auto}
+  h2{font-size:15px;margin:18px 2px 8px;color:var(--muted);font-weight:500}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);padding:12px;margin-bottom:10px}
+  .p-head{display:flex;gap:8px;align-items:center}
+  .dot{width:14px;height:14px;border-radius:50%;flex:none;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+  input[type=text]{font:inherit;font-size:16px;border:1px solid var(--line);border-radius:10px;padding:9px 10px;width:100%;background:#fff;color:var(--ink)}
+  input[type=text]:focus{outline:2px solid var(--accent);border-color:transparent}
+  .name{font-weight:500}
+  .row{display:flex;gap:6px;margin-top:8px}
+  .row > *{flex:1}
+  button{font:inherit;cursor:pointer;border:none;border-radius:10px;padding:9px 10px;background:#efece6;color:var(--ink);font-size:14px}
+  button:active{transform:scale(.98)}
+  button.icon{flex:none;width:40px;padding:9px 0}
+  button.primary{background:var(--accent);color:var(--accent-ink);font-size:17px;font-weight:700;padding:14px;width:100%;border-radius:14px}
+  button.primary:disabled{opacity:.5}
+  button.ghost{background:transparent;border:1px dashed #c9c4b8;width:100%;color:var(--muted)}
+  .loc{font-size:13px;color:var(--muted);margin-top:6px;min-height:18px}
+  .loc.set{color:var(--ok)}
+  .modes{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap}
+  .chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:7px 11px;font-size:13px;white-space:nowrap}
+  .chip.on{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .sugg{margin-top:6px;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .sugg div{padding:9px 10px;font-size:14px;border-bottom:1px solid var(--line);background:#fff;cursor:pointer}
+  .sugg div:last-child{border-bottom:none}
+  .sugg div:active{background:#f3f1ec}
+  .opts{display:flex;gap:6px;flex-wrap:wrap}
+  .status{font-size:14px;color:var(--muted);text-align:center;margin:12px 0;min-height:20px}
+  .status.err{color:var(--bad)}
+  #results{scroll-margin-top:80px}
+  .res{cursor:pointer;transition:box-shadow .15s}
+  .res.sel{box-shadow:0 0 0 2px var(--accent)}
+  .res-top{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .res h3{margin:0;font-size:17px}
+  .res .meta{font-size:12px;color:var(--muted);margin-top:2px}
+  .badge{font-size:12px;border-radius:999px;padding:3px 8px;background:#f1efe9;white-space:nowrap}
+  .badge.best{background:var(--accent);color:#fff}
+  .times{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+  .t{display:flex;align-items:center;gap:5px;font-size:13px;background:#f7f6f2;border-radius:8px;padding:5px 8px}
+  .bar{height:6px;border-radius:3px;background:#eee;margin-top:10px;position:relative;overflow:hidden;direction:ltr}
+  .bar i{position:absolute;top:0;bottom:0;border-radius:3px;background:linear-gradient(90deg,#22c55e,#f59e0b)}
+  .summary{font-size:13px;margin-top:8px}
+  .actions{display:flex;gap:6px;margin-top:10px}
+  .actions a{flex:1;text-align:center;text-decoration:none;font-size:14px;padding:9px;border-radius:10px;background:#efece6;color:var(--ink)}
+  .actions a.wa{background:#25d366;color:#fff;font-weight:500}
+  .open{color:var(--ok)} .closed{color:var(--bad)}
+  details{font-size:13px;color:var(--muted);margin-top:22px}
+  details p{line-height:1.55}
+  .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:2000;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
+  .toast.show{opacity:1}
+  .pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
+  .pin b{transform:rotate(45deg);color:#fff;font:700 12px Rubik,sans-serif}
+  .vpin{width:14px;height:14px;border-radius:50%;background:#14181f;border:2px solid #fff;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+  .vpin.sel{width:22px;height:22px;background:var(--accent)}
+  .vnum{color:#fff;font:700 11px Rubik;display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>בא<span>מצע</span></h1>
+    <div class="sub">מקום מפגש הוגן לפי זמן הגעה, לא לפי מרחק</div>
+  </div>
+  <button id="shareSetup" style="background:#1f2937;color:#fff;font-size:13px">🔗 שלח לקבוצה</button>
+</header>
+
+<div id="map"></div>
+
+<main>
+  <h2>מי נפגש?</h2>
+  <div id="people"></div>
+  <button class="ghost" id="addPerson">+ הוסף משתתף</button>
+
+  <h2>איזה מקום?</h2>
+  <div class="opts" id="types"></div>
+  <div class="opts" style="margin-top:8px">
+    <button class="chip on" id="openNow">🕒 רק מקומות שפתוחים עכשיו</button>
+  </div>
+
+  <div style="margin-top:18px"><button class="primary" id="go">מצאו לנו מקום הוגן</button></div>
+  <div class="status" id="status"></div>
+  <div id="results"></div>
+
+  <details>
+    <summary>איך זה עובד</summary>
+    <p>לכל משתתף נחשב זמן נסיעה אמיתי במסלולים ברשת הכבישים והשבילים (OpenStreetMap), לפי אמצעי התחבורה שלו. קורקינט ואופניים חשמליים מחושבים על רשת האופניים במהירות של כ־20 קמ״ש בממוצע. ברכב נוסף מקדם עומסים ו־5 דקות חניה.</p>
+    <p>האפליקציה מאתרת קודם את האזור שבו זמני ההגעה הכי מאוזנים, שולפת ברים, בתי קפה ומסעדות באזור, ומחשבת לכל מקום את זמן ההגעה של כל אחד. הדירוג מעדיף את המקום שבו <b>מי שמגיע אחרון מגיע הכי מהר</b>, ובהינתן זה, את המקום עם <b>הפער הקטן ביותר</b> בין המשתתפים.</p>
+    <p>תחבורה ציבורית עדיין לא נתמכת. נתוני מקומות ושעות פתיחה מגיעים מ־OpenStreetMap ועלולים להיות חלקיים.</p>
+  </details>
+</main>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+"use strict";
+// ---------- config ----------
+const MODES = {
+  ebike:{label:'קורקינט / חשמלי', icon:'🛴', profile:'bike', factor:0.75, mult:1,   extra:0, estKmh:19, gmaps:'bicycling'},
+  bike: {label:'אופניים',          icon:'🚲', profile:'bike', factor:1.0,  mult:1,   extra:0, estKmh:14, gmaps:'bicycling'},
+  walk: {label:'הליכה',            icon:'🚶', profile:'foot', factor:1.0,  mult:1,   extra:0, estKmh:4.7, gmaps:'walking'},
+  car:  {label:'רכב',              icon:'🚗', profile:'car',  factor:1.0,  mult:1.3, extra:5, estKmh:22, gmaps:'driving'},
+};
+const OSRM = {
+  foot:'https://routing.openstreetmap.de/routed-foot',
+  bike:'https://routing.openstreetmap.de/routed-bike',
+  car:'https://routing.openstreetmap.de/routed-car',
+};
+const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
+const TYPES = {
+  bar:{label:'🍸 בר', tags:['bar','pub','biergarten']},
+  cafe:{label:'☕ בית קפה', tags:['cafe']},
+  restaurant:{label:'🍽️ מסעדה', tags:['restaurant']},
+};
+const TYPE_HE = {bar:'בר',pub:'פאב',biergarten:'בירגרטן',cafe:'בית קפה',restaurant:'מסעדה'};
+const COLORS = ['#2563eb','#db2777','#16a34a','#9333ea','#ea580c','#0891b2','#ca8a04','#4b5563'];
+const MAX_PEOPLE = 8, MAX_CANDIDATES = 40, TOP_N = 6;
+
+// ---------- state ----------
+let people = [];
+let selectedTypes = new Set(['bar','cafe']);
+let openNowOnly = true;
+let pickingFor = null;
+let results = [], selectedIdx = -1;
+let uid = 0;
+
+// ---------- utils ----------
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function toast(msg, ms=2600){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'), ms); }
+function status(msg, err=false){ const s=$('#status'); s.textContent=msg||''; s.classList.toggle('err', !!err); }
+function hav(a,b){ const R=6371000, r=Math.PI/180; const dLat=(b.lat-a.lat)*r, dLon=(b.lon-a.lon)*r;
+  const x=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
+const fmtMin = m => m==null||!isFinite(m) ? '—' : `${Math.round(m)} ד׳`;
+async function fetchJSON(url, opts={}, timeoutMs=20000){
+  const ctl = new AbortController(); const t = setTimeout(()=>ctl.abort(), timeoutMs);
+  try{ const r = await fetch(url, {...opts, signal:ctl.signal}); if(!r.ok) throw new Error('HTTP '+r.status); return await r.json(); }
+  finally{ clearTimeout(t); }
+}
+function store(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+function load(k,d){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):d; }catch(e){ return d; } }
+
+// ---------- map ----------
+const map = L.map('map', {zoomControl:false, attributionControl:true}).setView([32.0700, 34.7800], 13);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+  maxZoom: 19, subdomains:'abcd',
+  attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+}).addTo(map);
+L.control.zoom({position:'bottomleft'}).addTo(map);
+const layerPeople = L.layerGroup().addTo(map);
+const layerVenues = L.layerGroup().addTo(map);
+const layerRoutes = L.layerGroup().addTo(map);
+
+map.on('click', async e => {
+  if(!pickingFor) return;
+  const p = people.find(x=>x.id===pickingFor); pickingFor=null; $('#map').classList.remove('picking');
+  if(!p) return;
+  setLocation(p, e.latlng.lat, e.latlng.lng, 'נקודה במפה');
+  reverseLabel(p);
+});
+
+function personIcon(p, i){
+  return L.divIcon({className:'', iconSize:[26,26], iconAnchor:[13,26],
+    html:`<div class="pin" style="background:${p.color}"><b>${esc((p.name||String(i+1)).trim().charAt(0)||i+1)}</b></div>`});
+}
+function drawPeople(){
+  layerPeople.clearLayers();
+  people.forEach((p,i)=>{ if(p.lat!=null) L.marker([p.lat,p.lon],{icon:personIcon(p,i)}).addTo(layerPeople).bindTooltip(`${p.name||'משתתף '+(i+1)} · ${MODES[p.mode].icon}`); });
+}
+function fitAll(){
+  const pts = people.filter(p=>p.lat!=null).map(p=>[p.lat,p.lon]);
+  results.slice(0,TOP_N).forEach(r=>pts.push([r.lat,r.lon]));
+  if(pts.length===1) map.setView(pts[0], 15);
+  else if(pts.length>1) map.fitBounds(pts, {padding:[30,30]});
+}
+
+// ---------- people UI ----------
+function newPerson(data={}){
+  const used = new Set(people.map(p=>p.color));
+  const color = COLORS.find(c=>!used.has(c)) || COLORS[people.length % COLORS.length];
+  return {id:++uid, name:data.name||'', mode:data.mode&&MODES[data.mode]?data.mode:'ebike', lat:data.lat??null, lon:data.lon??null, label:data.label||'', color, sugg:[]};
+}
+function addPerson(data){ if(people.length>=MAX_PEOPLE){ toast('עד 8 משתתפים'); return; } people.push(newPerson(data)); renderPeople(); }
+function setLocation(p, lat, lon, label){ p.lat=+lat; p.lon=+lon; p.label=label; p.sugg=[]; renderPeople(); drawPeople(); fitAll(); saveState(); }
+
+function renderPeople(){
+  const box = $('#people'); box.innerHTML='';
+  people.forEach((p,i)=>{
+    const el = document.createElement('div'); el.className='card';
+    el.innerHTML = `
+      <div class="p-head">
+        <span class="dot" style="background:${p.color}"></span>
+        <input type="text" class="name" placeholder="שם (לא חובה)" value="${esc(p.name)}" data-k="name">
+        ${people.length>2?`<button class="icon" data-act="del" title="הסר">✕</button>`:''}
+      </div>
+      <div class="row">
+        <input type="text" placeholder="מאיפה יוצאים? כתובת או מקום" data-k="q" enterkeyhint="search">
+        <button class="icon" data-act="search" title="חפש">🔎</button>
+      </div>
+      ${p.sugg.length?`<div class="sugg">${p.sugg.map((s,j)=>`<div data-sugg="${j}">${esc(s.label)}</div>`).join('')}</div>`:''}
+      <div class="row">
+        <button data-act="gps">📍 המיקום שלי</button>
+        <button data-act="pick">🗺️ בחר במפה</button>
+      </div>
+      <div class="loc ${p.lat!=null?'set':''}">${p.lat!=null?'✓ '+esc(p.label||'מיקום נבחר'):'עוד לא נבחר מיקום'}</div>
+      <div class="modes">${Object.entries(MODES).map(([k,m])=>`<button class="chip ${p.mode===k?'on':''}" data-mode="${k}">${m.icon} ${m.label}</button>`).join('')}</div>`;
+    el.querySelector('[data-k=name]').addEventListener('input', e=>{ p.name=e.target.value; drawPeople(); saveState(); });
+    const q = el.querySelector('[data-k=q]');
+    q.addEventListener('keydown', e=>{ if(e.key==='Enter'){ e.preventDefault(); geocode(p, q.value); }});
+    el.querySelector('[data-act=search]').onclick = ()=>geocode(p, q.value);
+    el.querySelector('[data-act=gps]').onclick = ()=>gps(p);
+    el.querySelector('[data-act=pick]').onclick = ()=>{ pickingFor=p.id; $('#map').classList.add('picking'); window.scrollTo({top:0,behavior:'smooth'}); toast('הקש על המפה כדי לבחור נקודת יציאה'); };
+    const del = el.querySelector('[data-act=del]'); if(del) del.onclick=()=>{ people=people.filter(x=>x!==p); renderPeople(); drawPeople(); saveState(); };
+    el.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{ p.mode=b.dataset.mode; renderPeople(); drawPeople(); saveState(); });
+    el.querySelectorAll('[data-sugg]').forEach(d=>d.onclick=()=>{ const s=p.sugg[+d.dataset.sugg]; setLocation(p, s.lat, s.lon, s.label); });
+    box.appendChild(el);
+  });
+}
+
+async function geocode(p, q){
+  q=(q||'').trim(); if(!q) return;
+  const c = map.getCenter();
+  const vb = [c.lng-0.25, c.lat+0.2, c.lng+0.25, c.lat-0.2].join(',');
+  const url = `${NOMINATIM}/search?format=jsonv2&limit=5&countrycodes=il&accept-language=he&viewbox=${vb}&q=${encodeURIComponent(q)}`;
+  try{
+    status('מחפש כתובת…');
+    const res = await fetchJSON(url, {}, 12000);
+    status('');
+    if(!res.length){ toast('לא נמצאה כתובת. נסה לנסח אחרת או לבחור במפה'); return; }
+    p.sugg = res.map(r=>({lat:+r.lat, lon:+r.lon, label: shortLabel(r.display_name)}));
+    if(p.sugg.length===1) setLocation(p, p.sugg[0].lat, p.sugg[0].lon, p.sugg[0].label); else renderPeople();
+  }catch(e){ status(''); toast('החיפוש נכשל. בדוק חיבור ונסה שוב'); }
+}
+function shortLabel(s){ return String(s).split(',').slice(0,3).join(',').trim(); }
+async function reverseLabel(p){
+  try{
+    const r = await fetchJSON(`${NOMINATIM}/reverse?format=jsonv2&zoom=17&accept-language=he&lat=${p.lat}&lon=${p.lon}`, {}, 8000);
+    if(r && r.display_name){ p.label = shortLabel(r.display_name); renderPeople(); saveState(); }
+  }catch(e){}
+}
+function gps(p){
+  if(!navigator.geolocation){ toast('הדפדפן לא תומך במיקום'); return; }
+  toast('מאתר מיקום…');
+  navigator.geolocation.getCurrentPosition(pos=>{
+    setLocation(p, pos.coords.latitude, pos.coords.longitude, 'המיקום הנוכחי'); reverseLabel(p);
+  }, ()=>toast('אין הרשאת מיקום. אפשר לחפש כתובת או לבחור במפה'), {enableHighAccuracy:true, timeout:10000});
+}
+
+// ---------- type chips ----------
+function renderTypes(){
+  const box=$('#types'); box.innerHTML='';
+  Object.entries(TYPES).forEach(([k,t])=>{
+    const b=document.createElement('button'); b.className='chip'+(selectedTypes.has(k)?' on':''); b.textContent=t.label;
+    b.onclick=()=>{ if(selectedTypes.has(k)&&selectedTypes.size===1) return; selectedTypes.has(k)?selectedTypes.delete(k):selectedTypes.add(k); renderTypes(); saveState(); };
+    box.appendChild(b);
+  });
+}
+$('#openNow').onclick = e => { openNowOnly=!openNowOnly; e.currentTarget.classList.toggle('on', openNowOnly); saveState(); };
+
+// ---------- opening hours (common OSM formats) ----------
+const OH_DAYS = ['Mo','Tu','We','Th','Fr','Sa','Su']; // index 0..6 ; JS getDay: Su=0
+function ohToday(oh, jsDay){ // returns array of [start,end] minutes for that day, [] if closed, null if unparseable
+  oh = oh.trim();
+  if(oh==='24/7') return [[0,1440]];
+  let dayIntervals = null; // last matching rule wins
+  const myIdx = (jsDay+6)%7;
+  for(let rule of oh.split(';')){
+    rule = rule.trim(); if(!rule) continue;
+    const m = rule.match(/^((?:(?:Mo|Tu|We|Th|Fr|Sa|Su|PH)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)(?:\s*,\s*(?:Mo|Tu|We|Th|Fr|Sa|Su|PH)(?:-(?:Mo|Tu|We|Th|Fr|Sa|Su))?)*)?\s*(.*)$/);
+    if(!m) return null;
+    const daysPart = m[1], timesPart = (m[2]||'').trim();
+    let applies = !daysPart;
+    if(daysPart){
+      for(const tok of daysPart.split(',').map(s=>s.trim())){
+        if(tok==='PH') continue;
+        const [a,b] = tok.split('-'); const ia=OH_DAYS.indexOf(a), ib=b?OH_DAYS.indexOf(b):ia;
+        if(ia<0||ib<0) return null;
+        for(let k=ia, n=0; n<7; k=(k+1)%7, n++){ if(k===myIdx) applies=true; if(k===ib) break; }
+      }
+    }
+    if(!applies) continue;
+    if(/^(off|closed)$/i.test(timesPart)){ dayIntervals=[]; continue; }
+    if(!timesPart){ continue; }
+    const iv=[];
+    for(const span of timesPart.split(',').map(s=>s.trim())){
+      const t = span.match(/^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})\+?$/);
+      if(!t) return null;
+      let s=+t[1]*60+ +t[2], e=+t[3]*60+ +t[4];
+      if(e<=s) e+=1440;
+      iv.push([s,e]);
+    }
+    dayIntervals = iv;
+  }
+  return dayIntervals ?? [];
+}
+function isOpenNow(oh, now=new Date()){
+  if(!oh) return null;
+  try{
+    const mins = now.getHours()*60+now.getMinutes(), d=now.getDay();
+    const today = ohToday(oh, d), yest = ohToday(oh, (d+6)%7);
+    if(today==null||yest==null) return null;
+    if(today.some(([s,e])=>mins>=s&&mins<e)) return true;
+    if(yest.some(([s,e])=>e>1440 && mins < e-1440)) return true;
+    return false;
+  }catch(e){ return null; }
+}
+
+// ---------- core algorithm ----------
+function estMinutes(p, pt){ const m=MODES[p.mode]; return hav(p,pt)*1.35/1000/m.estKmh*60*m.mult + m.extra; }
+function fairness(times){ const mx=Math.max(...times), mn=Math.min(...times); return {max:mx, min:mn, spread:mx-mn, score: mx + 0.5*(mx-mn)}; }
+
+function estimateCenter(ps){
+  const lats=ps.map(p=>p.lat), lons=ps.map(p=>p.lon);
+  let la0=Math.min(...lats), la1=Math.max(...lats), lo0=Math.min(...lons), lo1=Math.max(...lons);
+  const padLa=Math.max((la1-la0)*0.15, 0.004), padLo=Math.max((lo1-lo0)*0.15, 0.004);
+  la0-=padLa; la1+=padLa; lo0-=padLo; lo1+=padLo;
+  let best=null; const N=40;
+  for(let i=0;i<=N;i++) for(let j=0;j<=N;j++){
+    const pt={lat:la0+(la1-la0)*i/N, lon:lo0+(lo1-lo0)*j/N};
+    const f=fairness(ps.map(p=>estMinutes(p,pt)));
+    if(!best||f.score<best.f.score) best={pt,f};
+  }
+  return best;
+}
+
+async function overpass(center, radius, tags){
+  const q = `[out:json][timeout:25];nwr["amenity"~"^(${tags.join('|')})$"]["name"](around:${Math.round(radius)},${center.lat.toFixed(6)},${center.lon.toFixed(6)});out center tags 500;`;
+  let lastErr;
+  for(const ep of OVERPASS){
+    try{ const r = await fetchJSON(ep, {method:'POST', body:'data='+encodeURIComponent(q), headers:{'Content-Type':'application/x-www-form-urlencoded'}}, 30000); return r.elements||[]; }
+    catch(e){ lastErr=e; }
+  }
+  throw lastErr || new Error('overpass');
+}
+function venueFromEl(el){
+  const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon; const t=el.tags||{};
+  if(lat==null) return null;
+  const name = t['name:he'] || t.name;
+  const street = [t['addr:street'], t['addr:housenumber']].filter(Boolean).join(' ');
+  return {id:el.type+el.id, lat, lon, name, alt: (t['name:he'] && t.name!==t['name:he'])?t.name:'', amenity:t.amenity, cuisine:t.cuisine||'', addr:street, oh:t.opening_hours||'', open:isOpenNow(t.opening_hours)};
+}
+
+async function osrmTable(profile, origins, dests){
+  // returns matrix [origin][dest] seconds
+  const out = origins.map(()=>new Array(dests.length).fill(null));
+  const CH = 40;
+  for(let off=0; off<dests.length; off+=CH){
+    const chunk = dests.slice(off, off+CH);
+    const coords = [...origins, ...chunk].map(p=>`${p.lon.toFixed(6)},${p.lat.toFixed(6)}`).join(';');
+    const src = origins.map((_,i)=>i).join(';');
+    const dst = chunk.map((_,j)=>origins.length+j).join(';');
+    const url = `${OSRM[profile]}/table/v1/driving/${coords}?sources=${src}&destinations=${dst}&annotations=duration`;
+    const r = await fetchJSON(url, {}, 25000);
+    if(r.code!=='Ok') throw new Error('osrm '+r.code);
+    r.durations.forEach((row,i)=>row.forEach((v,j)=>{ out[i][off+j]=v; }));
+  }
+  return out;
+}
+
+async function findPlaces(){
+  const ps = people.filter(p=>p.lat!=null);
+  if(ps.length<2){ status('צריך לפחות שני משתתפים עם מיקום', true); return; }
+  const btn=$('#go'); btn.disabled=true; results=[]; selectedIdx=-1; renderResults(); layerVenues.clearLayers(); layerRoutes.clearLayers();
+  try{
+    status('מחשב את האזור המאוזן…');
+    const est = estimateCenter(ps);
+    const spreadDist = Math.max(...ps.map(p=>hav(p, est.pt)));
+    let radius = Math.min(Math.max(spreadDist*0.35, 450), 2500);
+    const tags = [...selectedTypes].flatMap(k=>TYPES[k].tags);
+
+    status('מחפש מקומות באזור…');
+    let venues = [];
+    for(let attempt=0; attempt<3; attempt++){
+      const els = await overpass(est.pt, radius, tags);
+      venues = els.map(venueFromEl).filter(v=>v&&v.name);
+      const seen=new Set(); venues=venues.filter(v=>{ const k=v.name+'|'+v.lat.toFixed(4)+v.lon.toFixed(4); if(seen.has(k)) return false; seen.add(k); return true; });
+      if(openNowOnly) venues = venues.filter(v=>v.open!==false);
+      if(venues.length>=12 || radius>=4000) break;
+      radius = Math.min(radius*1.8, 4000);
+    }
+    if(!venues.length){ status('לא נמצאו מקומות מתאימים באזור. נסו סוג מקום אחר או לבטל "פתוח עכשיו"', true); return; }
+
+    // pre-rank by estimate, keep best candidates
+    venues.forEach(v=>{ v.est = fairness(ps.map(p=>estMinutes(p,v))).score; });
+    // prefer venues with confirmed opening hours when "open now"
+    venues.sort((a,b)=>(a.est - (a.open===true?1.5:0)) - (b.est - (b.open===true?1.5:0)));
+    const cands = venues.slice(0, MAX_CANDIDATES);
+
+    status(`מחשב זמני נסיעה אמיתיים ל־${cands.length} מקומות…`);
+    const byProfile = {};
+    ps.forEach((p,i)=>{ const pr=MODES[p.mode].profile; (byProfile[pr] ||= []).push(i); });
+    const times = ps.map(()=>new Array(cands.length).fill(null));
+    await Promise.all(Object.entries(byProfile).map(async ([pr, idxs])=>{
+      const m = await osrmTable(pr, idxs.map(i=>ps[i]), cands);
+      idxs.forEach((pi,k)=>{ const mode=MODES[ps[pi].mode];
+        m[k].forEach((sec,j)=>{ times[pi][j] = sec==null?null: sec/60*mode.factor*mode.mult + mode.extra; }); });
+    }));
+
+    results = cands.map((v,j)=>{
+      const t = ps.map((_,i)=>times[i][j]);
+      if(t.some(x=>x==null)) return null;
+      return {...v, times:t, ...fairness(t)};
+    }).filter(Boolean).sort((a,b)=>a.score-b.score).slice(0, TOP_N);
+
+    if(!results.length){ status('לא הצלחנו לחשב מסלולים. נסו שוב בעוד רגע', true); return; }
+    lastPs = ps;
+    status('');
+    renderResults(); drawVenues(); selectResult(0, false); fitAll();
+    setTimeout(()=>$('#results').scrollIntoView({behavior:'smooth', block:'start'}), 150);
+  }catch(e){
+    console.error(e);
+    status('שירות המפות לא הגיב. נסו שוב בעוד רגע', true);
+  }finally{ btn.disabled=false; }
+}
+let lastPs = [];
+
+// ---------- results UI ----------
+function gmapsDir(v, mode){ return `https://www.google.com/maps/dir/?api=1&destination=${v.lat},${v.lon}&travelmode=${mode}`; }
+function waText(v){
+  const lines = [`נפגשים ב־${v.name} 📍`];
+  if(v.addr) lines.push(v.addr);
+  lines.push(`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lon}`);
+  lines.push('', 'זמני הגעה:');
+  lastPs.forEach((p,i)=>lines.push(`${MODES[p.mode].icon} ${p.name||'משתתף '+(i+1)}: ${Math.round(v.times[i])} דק׳`));
+  lines.push('', `פער של ${Math.round(v.spread)} דק׳ בלבד בין כולם · נמצא עם "באמצע"`);
+  return lines.join('\n');
+}
+function renderResults(){
+  const box=$('#results'); box.innerHTML='';
+  if(!results.length) return;
+  const h=document.createElement('h2'); h.textContent='ההצעות שלנו'; box.appendChild(h);
+  const globalMax = Math.max(...results.map(r=>r.max));
+  results.forEach((r,idx)=>{
+    const el=document.createElement('div'); el.className='card res'+(idx===selectedIdx?' sel':'');
+    const openTxt = r.open===true?'<span class="open">פתוח עכשיו</span>': r.open===false?'<span class="closed">סגור עכשיו</span>':'<span>שעות לא ידועות</span>';
+    const meta = [TYPE_HE[r.amenity]||r.amenity, r.addr, openTxt].filter(Boolean).join(' · ');
+    const lo = r.min/globalMax*100, hi = r.max/globalMax*100;
+    el.innerHTML = `
+      <div class="res-top">
+        <div><h3>${idx+1}. ${esc(r.name)}</h3><div class="meta">${meta}</div></div>
+        <span class="badge ${idx===0?'best':''}">${idx===0?'הכי הוגן':'פער '+Math.round(r.spread)+' ד׳'}</span>
+      </div>
+      <div class="times">${lastPs.map((p,i)=>`<span class="t"><span class="dot" style="background:${p.color};width:10px;height:10px"></span>${MODES[p.mode].icon} ${esc(p.name||'משתתף '+(i+1))} · <b>${fmtMin(r.times[i])}</b></span>`).join('')}</div>
+      <div class="bar" title="טווח זמני ההגעה"><i style="left:${lo}%;width:${Math.max(hi-lo,2)}%"></i></div>
+      <div class="summary">כולם מגיעים תוך <b>${fmtMin(r.max)}</b> · פער של <b>${fmtMin(r.spread)}</b> בין הראשון לאחרון</div>
+      <div class="actions">
+        <a class="wa" href="https://wa.me/?text=${encodeURIComponent(waText(r))}" target="_blank" rel="noopener">שלח בוואטסאפ</a>
+        <a href="https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lon}" target="_blank" rel="noopener">פתח במפות</a>
+      </div>`;
+    el.onclick = e => { if(e.target.closest('a')) return; selectResult(idx, true); };
+    box.appendChild(el);
+  });
+}
+function drawVenues(){
+  layerVenues.clearLayers();
+  results.forEach((r,idx)=>{
+    const sel = idx===selectedIdx;
+    const icon = L.divIcon({className:'', iconSize:sel?[22,22]:[18,18], iconAnchor:sel?[11,11]:[9,9],
+      html:`<div class="vpin ${sel?'sel':''}" style="${sel?'':'width:18px;height:18px'}"><span class="vnum">${idx+1}</span></div>`});
+    L.marker([r.lat,r.lon],{icon, zIndexOffset: sel?1000:0}).addTo(layerVenues).on('click',()=>selectResult(idx,true)).bindTooltip(r.name);
+  });
+}
+async function selectResult(idx, scroll){
+  selectedIdx=idx; renderResults(); drawVenues();
+  const r=results[idx]; layerRoutes.clearLayers();
+  if(scroll) window.scrollTo({top:0, behavior:'smooth'});
+  const ps = lastPs;
+  await Promise.all(ps.map(async p=>{
+    try{
+      const url = `${OSRM[MODES[p.mode].profile]}/route/v1/driving/${p.lon},${p.lat};${r.lon},${r.lat}?overview=simplified&geometries=geojson`;
+      const j = await fetchJSON(url, {}, 15000);
+      if(selectedIdx!==idx) return;
+      const coords = j.routes?.[0]?.geometry?.coordinates; if(!coords) return;
+      L.polyline(coords.map(c=>[c[1],c[0]]), {color:p.color, weight:4, opacity:.8}).addTo(layerRoutes);
+    }catch(e){
+      L.polyline([[p.lat,p.lon],[r.lat,r.lon]], {color:p.color, weight:2, dashArray:'4 6'}).addTo(layerRoutes);
+    }
+  }));
+}
+
+// ---------- share / persist ----------
+function encodeState(){
+  const data = people.filter(p=>p.lat!=null).map(p=>({n:p.name, m:p.mode, a:+p.lat.toFixed(5), o:+p.lon.toFixed(5), l:p.label}));
+  return btoa(unescape(encodeURIComponent(JSON.stringify({p:data, t:[...selectedTypes]})))).replace(/\+/g,'-').replace(/\//g,'_').replace(/=+$/,'');
+}
+function decodeState(s){
+  s=s.replace(/-/g,'+').replace(/_/g,'/'); while(s.length%4) s+='=';
+  return JSON.parse(decodeURIComponent(escape(atob(s))));
+}
+function saveState(){ store('baemtza', {p:people.map(p=>({name:p.name,mode:p.mode,lat:p.lat,lon:p.lon,label:p.label})), t:[...selectedTypes], o:openNowOnly}); }
+$('#shareSetup').onclick = async ()=>{
+  const url = location.origin + location.pathname + '#s=' + encodeState();
+  const text = 'מוסיפים את נקודת היציאה שלכם ושולחים חזרה, ונמצא מקום הוגן לכולם 👇\n' + url;
+  if(navigator.share){ try{ await navigator.share({title:'באמצע', text}); return; }catch(e){ if(e.name==='AbortError') return; } }
+  window.open('https://wa.me/?text='+encodeURIComponent(text), '_blank');
+};
+
+function init(){
+  let loaded=false;
+  const m = location.hash.match(/^#s=(.+)$/);
+  if(m){
+    try{
+      const st = decodeState(m[1]);
+      st.p.forEach(x=>people.push(newPerson({name:x.n, mode:x.m, lat:x.a, lon:x.o, label:x.l})));
+      if(st.t?.length) selectedTypes = new Set(st.t.filter(k=>TYPES[k]));
+      people.push(newPerson()); loaded=true;
+      toast('קיבלת מפגש מהקבוצה. הוסף את המיקום שלך ולחץ "מצאו לנו מקום"', 4500);
+      history.replaceState(null, '', location.pathname);
+    }catch(e){}
+  }
+  if(!loaded){
+    const s = load('baemtza', null);
+    if(s && s.p && s.p.length>=2){ s.p.forEach(x=>people.push(newPerson(x))); if(s.t?.length) selectedTypes=new Set(s.t.filter(k=>TYPES[k])); if(typeof s.o==='boolean') openNowOnly=s.o; }
+    else { people.push(newPerson()); people.push(newPerson()); }
+  }
+  $('#openNow').classList.toggle('on', openNowOnly);
+  renderPeople(); renderTypes(); drawPeople(); fitAll();
+}
+$('#addPerson').onclick = ()=>addPerson();
+$('#go').onclick = findPlaces;
+init();
+</script>
+</body>
+</html>
