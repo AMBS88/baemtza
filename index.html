@@ -74,6 +74,15 @@
   .fate{display:flex;gap:8px;align-items:center;margin:4px 0 12px}
   .fate button{flex:1;background:var(--ink);color:#fff;font-weight:500;font-size:15px;padding:12px}
   .res.spin{box-shadow:0 0 0 3px #facc15;transform:scale(1.015);transition:transform .08s}
+  .mapwrap{position:relative}
+  .clock{position:absolute;top:10px;right:10px;z-index:900;background:rgba(20,24,31,.88);color:#fff;border-radius:12px;padding:8px 12px;font:700 18px Rubik;display:none;direction:rtl}
+  .clock small{display:block;font:400 11px Rubik;color:#cbd5e1}
+  .legend{position:absolute;bottom:10px;right:10px;z-index:900;background:rgba(255,255,255,.92);border-radius:10px;padding:6px 9px;font-size:11px;display:none;box-shadow:0 1px 4px rgba(0,0,0,.2)}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-inline-start:6px;vertical-align:-1px}
+  .maptgl{position:absolute;top:10px;left:10px;z-index:900;display:none;background:#fff;border-radius:10px;box-shadow:0 1px 4px rgba(0,0,0,.25);font-size:13px;padding:7px 10px}
+  .runner{width:30px;height:30px;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .runner.done{animation:pop .5s}
+  @keyframes pop{50%{transform:scale(1.5)}}
   #confetti{position:fixed;inset:0;pointer-events:none;z-index:3000}
   .status.fun{font-style:italic}
   .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:2000;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
@@ -94,7 +103,12 @@
   <button id="shareSetup" style="background:#1f2937;color:#fff;font-size:13px">🔗 שלח לקבוצה</button>
 </header>
 
-<div id="map"></div>
+<div class="mapwrap">
+  <div id="map"></div>
+  <div class="clock" id="clock"></div>
+  <button class="maptgl" id="heatTgl">🔥 מפת הוגנות</button>
+  <div class="legend" id="legend">אזור הוגן: <i style="background:#16a34a"></i>מצוין <i style="background:#facc15"></i>סביר <i style="background:#f97316"></i>פחות</div>
+</div>
 
 <main>
   <h2>מי נפגש?</h2>
@@ -186,6 +200,10 @@ L.control.zoom({position:'bottomleft'}).addTo(map);
 const layerPeople = L.layerGroup().addTo(map);
 const layerVenues = L.layerGroup().addTo(map);
 const layerRoutes = L.layerGroup().addTo(map);
+const heatRenderer = L.canvas({padding:.5});
+const layerHeat = L.layerGroup();
+const layerRace = L.layerGroup().addTo(map);
+let heatOn = true, routeGeo = [];
 
 map.on('click', async e => {
   if(!pickingFor) return;
@@ -350,12 +368,15 @@ function estimateCenter(ps){
   let la0=Math.min(...lats), la1=Math.max(...lats), lo0=Math.min(...lons), lo1=Math.max(...lons);
   const padLa=Math.max((la1-la0)*0.15, 0.004), padLo=Math.max((lo1-lo0)*0.15, 0.004);
   la0-=padLa; la1+=padLa; lo0-=padLo; lo1+=padLo;
-  let best=null; const N=40;
+  let best=null; const N=40; const cells=[];
+  const dLa=(la1-la0)/N, dLo=(lo1-lo0)/N;
   for(let i=0;i<=N;i++) for(let j=0;j<=N;j++){
-    const pt={lat:la0+(la1-la0)*i/N, lon:lo0+(lo1-lo0)*j/N};
+    const pt={lat:la0+dLa*i, lon:lo0+dLo*j};
     const f=fairness(ps.map(p=>estMinutes(p,pt)));
+    cells.push({pt, s:f.score});
     if(!best||f.score<best.f.score) best={pt,f};
   }
+  best.grid={cells, dLa, dLo};
   return best;
 }
 
@@ -419,10 +440,10 @@ function transitTimeTo(origin, stops, v){
 async function findPlaces(){
   const ps = people.filter(p=>p.lat!=null);
   if(ps.length<2){ status('צריך לפחות שני משתתפים עם מיקום', true); return; }
-  const btn=$('#go'); btn.disabled=true; results=[]; selectedIdx=-1; renderResults(); layerVenues.clearLayers(); layerRoutes.clearLayers();
+  const btn=$('#go'); btn.disabled=true; results=[]; selectedIdx=-1; renderResults(); layerVenues.clearLayers(); layerRoutes.clearLayers(); layerHeat.clearLayers();
   try{
     funStatus(0);
-    const est = estimateCenter(ps);
+    const est = estimateCenter(ps); lastGrid = est.grid;
     const spreadDist = Math.max(...ps.map(p=>hav(p, est.pt)));
     let radius = Math.min(Math.max(spreadDist*0.35, 450), 2500);
     const tags = [...selectedTypes].flatMap(k=>TYPES[k].tags);
@@ -471,7 +492,7 @@ async function findPlaces(){
     if(!results.length){ status('לא הצלחנו לחשב מסלולים. נסו שוב בעוד רגע', true); return; }
     lastPs = ps;
     status('');
-    renderResults(); drawVenues(); selectResult(0, false); fitAll();
+    renderResults(); drawVenues(); drawHeat(); selectResult(0, false); fitAll();
     setTimeout(()=>$('#results').scrollIntoView({behavior:'smooth', block:'start'}), 150);
   }catch(e){
     console.error(e);
@@ -480,7 +501,59 @@ async function findPlaces(){
     else status('שירות המפות לא הגיב. נסו שוב בעוד רגע', true);
   }finally{ btn.disabled=false; }
 }
-let lastPs = [];
+let lastPs = [], lastGrid = null;
+function drawHeat(){
+  layerHeat.clearLayers();
+  if(!lastGrid) return;
+  const {cells,dLa,dLo}=lastGrid; const b=Math.min(...cells.map(c=>c.s));
+  cells.forEach(c=>{
+    const d=c.s-b; let col=null, op=0;
+    if(d<3){col='#16a34a'; op=.42;} else if(d<7){col='#22c55e'; op=.28;} else if(d<11){col='#facc15'; op=.24;} else if(d<16){col='#f97316'; op=.14;}
+    if(!col) return;
+    L.rectangle([[c.pt.lat-dLa/2,c.pt.lon-dLo/2],[c.pt.lat+dLa/2,c.pt.lon+dLo/2]], {renderer:heatRenderer, stroke:false, fillColor:col, fillOpacity:op, interactive:false}).addTo(layerHeat);
+  });
+  if(heatOn){ layerHeat.addTo(map); $('#legend').style.display='block'; } else { map.removeLayer(layerHeat); $('#legend').style.display='none'; }
+  $('#heatTgl').style.display='block'; $('#heatTgl').textContent = heatOn ? '🔥 הסתר מפת הוגנות' : '🔥 מפת הוגנות';
+}
+$('#heatTgl').onclick=()=>{ heatOn=!heatOn; drawHeat(); };
+
+// ---------- race animation ----------
+let racing=false;
+function pathLen(ll){ const cum=[0]; for(let i=1;i<ll.length;i++) cum.push(cum[i-1]+hav({lat:ll[i-1][0],lon:ll[i-1][1]},{lat:ll[i][0],lon:ll[i][1]})); return cum; }
+function pointAt(ll, cum, f){
+  const target=cum[cum.length-1]*f; let i=1; while(i<cum.length-1 && cum[i]<target) i++;
+  const seg=cum[i]-cum[i-1]||1, t=Math.min(1,Math.max(0,(target-cum[i-1])/seg));
+  return [ll[i-1][0]+(ll[i][0]-ll[i-1][0])*t, ll[i-1][1]+(ll[i][1]-ll[i-1][1])*t];
+}
+async function race(){
+  if(racing||selectedIdx<0) return; racing=true;
+  const r=results[selectedIdx], ps=lastPs;
+  window.scrollTo({top:0, behavior:'smooth'});
+  const pts=[...ps.map(p=>[p.lat,p.lon]), [r.lat,r.lon]]; map.fitBounds(pts,{padding:[40,40]});
+  layerRace.clearLayers();
+  const lines = ps.map((p,i)=>{ const ll = routeGeo[i] && routeGeo[i].length>1 ? routeGeo[i] : [[p.lat,p.lon],[r.lat,r.lon]]; return {ll, cum:pathLen(ll)}; });
+  const runners = ps.map((p,i)=>L.marker([p.lat,p.lon],{zIndexOffset:2000, icon:L.divIcon({className:'',iconSize:[30,30],iconAnchor:[15,15],html:`<div class="runner" style="background:${p.color}">${MODES[p.mode].icon}</div>`})}).addTo(layerRace));
+  const T=r.max, DUR=Math.min(9000, Math.max(4500, T*220)); const clock=$('#clock'); clock.style.display='block';
+  const arrived=new Array(ps.length).fill(false);
+  await new Promise(res=>{
+    const t0=performance.now();
+    (function frame(now){
+      const el=Math.min(1,(now-t0)/DUR), minute=el*T;
+      clock.innerHTML=`${Math.floor(minute)}:${String(Math.floor((minute%1)*60)).padStart(2,'0')}<small>דקות מהיציאה</small>`;
+      ps.forEach((p,i)=>{
+        const f=Math.min(1, minute/r.times[i]); runners[i].setLatLng(pointAt(lines[i].ll, lines[i].cum, f));
+        if(f>=1 && !arrived[i]){ arrived[i]=true; const el2=runners[i].getElement()?.querySelector('.runner'); if(el2){ el2.classList.add('done'); el2.textContent='🍻'; }
+          try{ navigator.vibrate && navigator.vibrate(15); }catch(e){} }
+      });
+      if(el<1) requestAnimationFrame(frame); else res();
+    })(t0);
+  });
+  const order=ps.map((p,i)=>({n:nm(p,i),t:r.times[i]})).sort((a,b)=>a.t-b.t);
+  const first=order[0], last=order[order.length-1];
+  clock.innerHTML=`🏁 כולם הגיעו<small>${esc(first.n)} מחכה ${Math.round(last.t-first.t)} ד׳ ל${esc(last.n)}</small>`;
+  confetti();
+  setTimeout(()=>{ clock.style.display='none'; layerRace.clearLayers(); racing=false; }, 4000);
+}
 
 // ---------- fun ----------
 const FUN = [
@@ -545,8 +618,8 @@ function renderResults(){
   if(!results.length) return;
   const h=document.createElement('h2'); h.textContent='ההצעות שלנו'; box.appendChild(h);
   if(results.length>1){ const f=document.createElement('div'); f.className='fate';
-    f.innerHTML=`<button id="fateBtn">🎰 לא מצליחים להחליט? תנו לגורל</button>`; box.appendChild(f);
-    f.querySelector('button').onclick=letFateDecide; }
+    f.innerHTML=`<button id="raceBtn">🏁 צפו במרוץ</button><button id="fateBtn">🎰 תנו לגורל להחליט</button>`; box.appendChild(f);
+    f.querySelector('#fateBtn').onclick=letFateDecide; f.querySelector('#raceBtn').onclick=race; }
   const globalMax = Math.max(...results.map(r=>r.max));
   results.forEach((r,idx)=>{
     const el=document.createElement('div'); el.className='card res'+(idx===selectedIdx?' sel':'');
@@ -581,17 +654,18 @@ function drawVenues(){
 }
 async function selectResult(idx, scroll){
   selectedIdx=idx; renderResults(); drawVenues();
-  const r=results[idx]; layerRoutes.clearLayers();
+  const r=results[idx]; layerRoutes.clearLayers(); routeGeo=[];
   if(scroll) window.scrollTo({top:0, behavior:'smooth'});
   const ps = lastPs;
-  await Promise.all(ps.map(async p=>{
+  await Promise.all(ps.map(async (p,pi)=>{
     if(MODES[p.mode].profile==='transit'){ L.polyline([[p.lat,p.lon],[r.lat,r.lon]], {color:p.color, weight:3, dashArray:'2 8'}).addTo(layerRoutes); return; }
     try{
       const url = `${OSRM[MODES[p.mode].profile]}/route/v1/driving/${p.lon},${p.lat};${r.lon},${r.lat}?overview=simplified&geometries=geojson`;
       const j = await fetchJSON(url, {}, 15000);
       if(selectedIdx!==idx) return;
       const coords = j.routes?.[0]?.geometry?.coordinates; if(!coords) return;
-      L.polyline(coords.map(c=>[c[1],c[0]]), {color:p.color, weight:4, opacity:.8}).addTo(layerRoutes);
+      routeGeo[pi]=coords.map(c=>[c[1],c[0]]);
+      L.polyline(routeGeo[pi], {color:p.color, weight:4, opacity:.8}).addTo(layerRoutes);
     }catch(e){
       L.polyline([[p.lat,p.lon],[r.lat,r.lon]], {color:p.color, weight:2, dashArray:'4 6'}).addTo(layerRoutes);
     }
