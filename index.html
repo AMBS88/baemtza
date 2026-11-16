@@ -70,6 +70,12 @@
   .open{color:var(--ok)} .closed{color:var(--bad)}
   details{font-size:13px;color:var(--muted);margin-top:22px}
   details p{line-height:1.55}
+  .verdict{font-size:13px;margin-top:6px;padding:6px 9px;border-radius:8px;background:#fff6e5;color:#7c4a03}
+  .fate{display:flex;gap:8px;align-items:center;margin:4px 0 12px}
+  .fate button{flex:1;background:var(--ink);color:#fff;font-weight:500;font-size:15px;padding:12px}
+  .res.spin{box-shadow:0 0 0 3px #facc15;transform:scale(1.015);transition:transform .08s}
+  #confetti{position:fixed;inset:0;pointer-events:none;z-index:3000}
+  .status.fun{font-style:italic}
   .toast{position:fixed;bottom:calc(20px + env(safe-area-inset-bottom));left:50%;transform:translateX(-50%);background:var(--ink);color:#fff;padding:10px 16px;border-radius:12px;font-size:14px;z-index:2000;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90vw;text-align:center}
   .toast.show{opacity:1}
   .pin{width:26px;height:26px;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:3px solid #fff;box-shadow:0 1px 4px rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center}
@@ -109,10 +115,12 @@
     <summary>איך זה עובד</summary>
     <p>לכל משתתף נחשב זמן נסיעה אמיתי במסלולים ברשת הכבישים והשבילים (OpenStreetMap), לפי אמצעי התחבורה שלו. קורקינט ואופניים חשמליים מחושבים על רשת האופניים במהירות של כ־20 קמ״ש בממוצע. ברכב נוסף מקדם עומסים ו־5 דקות חניה.</p>
     <p>האפליקציה מאתרת קודם את האזור שבו זמני ההגעה הכי מאוזנים, שולפת ברים, בתי קפה ומסעדות באזור, ומחשבת לכל מקום את זמן ההגעה של כל אחד. הדירוג מעדיף את המקום שבו <b>מי שמגיע אחרון מגיע הכי מהר</b>, ובהינתן זה, את המקום עם <b>הפער הקטן ביותר</b> בין המשתתפים.</p>
-    <p>תחבורה ציבורית עדיין לא נתמכת. נתוני מקומות ושעות פתיחה מגיעים מ־OpenStreetMap ועלולים להיות חלקיים.</p>
+    <p>בתחבורה ציבורית נבדקים כל התחנות שאפשר להגיע אליהן מנקודת היציאה עכשיו (כולל המתנה והחלפות) בעזרת Transitous, ומוסיפים הליכה מהתחנה למקום. נתוני מקומות ושעות פתיחה מגיעים מ־OpenStreetMap ועלולים להיות חלקיים.</p>
+    <p>מפות ומסלולים: <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap contributors</a> · OSRM / FOSSGIS · תחבורה ציבורית: <a href="https://transitous.org/sources" target="_blank" rel="noopener">Transitous</a> · קוד פתוח: <a href="https://github.com/AMBS88/baemtza" target="_blank" rel="noopener">github.com/AMBS88/baemtza</a></p>
   </details>
 </main>
 <div class="toast" id="toast"></div>
+<canvas id="confetti"></canvas>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
@@ -122,6 +130,7 @@ const MODES = {
   ebike:{label:'קורקינט / חשמלי', icon:'🛴', profile:'bike', factor:0.75, mult:1,   extra:0, estKmh:19, gmaps:'bicycling'},
   bike: {label:'אופניים',          icon:'🚲', profile:'bike', factor:1.0,  mult:1,   extra:0, estKmh:14, gmaps:'bicycling'},
   walk: {label:'הליכה',            icon:'🚶', profile:'foot', factor:1.0,  mult:1,   extra:0, estKmh:4.7, gmaps:'walking'},
+  transit:{label:'תחב״צ',         icon:'🚌', profile:'transit', factor:1.0, mult:1, extra:8, estKmh:13, gmaps:'transit'},
   car:  {label:'רכב',              icon:'🚗', profile:'car',  factor:1.0,  mult:1.3, extra:5, estKmh:22, gmaps:'driving'},
 };
 const OSRM = {
@@ -131,6 +140,9 @@ const OSRM = {
 };
 const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
+const TRANSITOUS = 'https://api.transitous.org/api';
+const TRANSIT_VERSIONS = ['v6','v5','v4','v3','v2','v1'];
+let transitVersion = null;
 const TYPES = {
   bar:{label:'🍸 בר', tags:['bar','pub','biergarten']},
   cafe:{label:'☕ בית קפה', tags:['cafe']},
@@ -152,7 +164,7 @@ let uid = 0;
 const $ = s => document.querySelector(s);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 function toast(msg, ms=2600){ const t=$('#toast'); t.textContent=msg; t.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove('show'), ms); }
-function status(msg, err=false){ const s=$('#status'); s.textContent=msg||''; s.classList.toggle('err', !!err); }
+function status(msg, err=false){ const s=$('#status'); s.textContent=msg||''; s.classList.toggle('err', !!err); s.classList.remove('fun'); }
 function hav(a,b){ const R=6371000, r=Math.PI/180; const dLat=(b.lat-a.lat)*r, dLon=(b.lon-a.lon)*r;
   const x=Math.sin(dLat/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(dLon/2)**2; return 2*R*Math.asin(Math.sqrt(x)); }
 const fmtMin = m => m==null||!isFinite(m) ? '—' : `${Math.round(m)} ד׳`;
@@ -381,18 +393,41 @@ async function osrmTable(profile, origins, dests){
   return out;
 }
 
+async function transitReach(p){
+  const qs = `one=${p.lat.toFixed(6)},${p.lon.toFixed(6)}&maxTravelTime=75&time=${encodeURIComponent(new Date().toISOString())}`;
+  const versions = transitVersion ? [transitVersion] : TRANSIT_VERSIONS;
+  let lastErr;
+  for(const v of versions){
+    try{
+      const r = await fetchJSON(`${TRANSITOUS}/${v}/one-to-all?${qs}`, {}, 25000);
+      transitVersion = v;
+      let all = (r.all||[]).filter(x=>x.place && x.place.lat!=null && x.duration!=null).map(x=>({lat:x.place.lat, lon:x.place.lon, d:x.duration}));
+      // duration is minutes; guard in case a server version reports seconds
+      const ds = all.map(x=>x.d).sort((a,b)=>a-b); if(ds.length && ds[Math.floor(ds.length/2)] > 75*1.5) all.forEach(x=>x.d/=60);
+      return all;
+    }catch(e){ lastErr=e; }
+  }
+  throw lastErr || new Error('transit');
+}
+const WALK_MIN_PER_M = 1.3/4700*60;
+function transitTimeTo(origin, stops, v){
+  let best = hav(origin, v)*WALK_MIN_PER_M; // walking all the way
+  for(const s of stops){ const d = hav(s, v); if(d>900) continue; const t = s.d + d*WALK_MIN_PER_M; if(t<best) best=t; }
+  return best;
+}
+
 async function findPlaces(){
   const ps = people.filter(p=>p.lat!=null);
   if(ps.length<2){ status('צריך לפחות שני משתתפים עם מיקום', true); return; }
   const btn=$('#go'); btn.disabled=true; results=[]; selectedIdx=-1; renderResults(); layerVenues.clearLayers(); layerRoutes.clearLayers();
   try{
-    status('מחשב את האזור המאוזן…');
+    funStatus(0);
     const est = estimateCenter(ps);
     const spreadDist = Math.max(...ps.map(p=>hav(p, est.pt)));
     let radius = Math.min(Math.max(spreadDist*0.35, 450), 2500);
     const tags = [...selectedTypes].flatMap(k=>TYPES[k].tags);
 
-    status('מחפש מקומות באזור…');
+    funStatus(1);
     let venues = [];
     for(let attempt=0; attempt<3; attempt++){
       const els = await overpass(est.pt, radius, tags);
@@ -410,15 +445,22 @@ async function findPlaces(){
     venues.sort((a,b)=>(a.est - (a.open===true?1.5:0)) - (b.est - (b.open===true?1.5:0)));
     const cands = venues.slice(0, MAX_CANDIDATES);
 
-    status(`מחשב זמני נסיעה אמיתיים ל־${cands.length} מקומות…`);
+    funStatus(2, cands.length);
     const byProfile = {};
     ps.forEach((p,i)=>{ const pr=MODES[p.mode].profile; (byProfile[pr] ||= []).push(i); });
     const times = ps.map(()=>new Array(cands.length).fill(null));
-    await Promise.all(Object.entries(byProfile).map(async ([pr, idxs])=>{
+    const transitIdx = byProfile.transit || []; delete byProfile.transit;
+    const transitJobs = transitIdx.map(async pi=>{
+      let stops;
+      try{ stops = await transitReach(ps[pi]); }catch(e){ throw new Error('TRANSIT_DOWN'); }
+      if(stops.length<3) throw new Error('TRANSIT_NONE');
+      cands.forEach((v,j)=>{ times[pi][j] = transitTimeTo(ps[pi], stops, v); });
+    });
+    await Promise.all([...transitJobs, ...Object.entries(byProfile).map(async ([pr, idxs])=>{
       const m = await osrmTable(pr, idxs.map(i=>ps[i]), cands);
       idxs.forEach((pi,k)=>{ const mode=MODES[ps[pi].mode];
         m[k].forEach((sec,j)=>{ times[pi][j] = sec==null?null: sec/60*mode.factor*mode.mult + mode.extra; }); });
-    }));
+    })]);
 
     results = cands.map((v,j)=>{
       const t = ps.map((_,i)=>times[i][j]);
@@ -433,10 +475,58 @@ async function findPlaces(){
     setTimeout(()=>$('#results').scrollIntoView({behavior:'smooth', block:'start'}), 150);
   }catch(e){
     console.error(e);
-    status('שירות המפות לא הגיב. נסו שוב בעוד רגע', true);
+    if(e.message==='TRANSIT_NONE') status('לא נמצאה תחבורה ציבורית פעילה עכשיו (אולי שבת?). נסו אמצעי תחבורה אחר', true);
+    else if(e.message==='TRANSIT_DOWN') status('שירות התחבורה הציבורית לא הגיב. נסו שוב או בחרו אמצעי תחבורה אחר', true);
+    else status('שירות המפות לא הגיב. נסו שוב בעוד רגע', true);
   }finally{ btn.disabled=false; }
 }
 let lastPs = [];
+
+// ---------- fun ----------
+const FUN = [
+  ['מחפש את האמצע האמיתי (לא זה של הסרגל)…','מפעיל את האלגוריתם של יוסף המקראי: שבע שנות נסיעה, חלוקה הוגנת…','מתייעץ עם בית הדין לצדק במפגשים…'],
+  ['סורק ברים ובתי קפה באזור…','בודק איפה עוד יש שולחן בחוץ…','מחפש מקום שהברמן לא יגיד "רק בר"…'],
+  ['מחשב זמני נסיעה אמיתיים ל־{n} מקומות…','סופר רמזורים בדרך…','מחשב כמה קורקינטים יעקפו אתכם בשביל…'],
+];
+function funStatus(stage, n){ const arr=FUN[stage]; status(arr[Math.floor(Math.random()*arr.length)].replace('{n}', n??'')); $('#status').classList.add('fun'); }
+function nm(p,i){ return (p.name||'').trim() || ('משתתף '+(i+1)); }
+function verdict(r){
+  const ps=lastPs, t=r.times;
+  if(r.spread<=3) return '⚖️ צדק מושלם. אף אחד לא יכול להתלונן (אבל מישהו עדיין ינסה)';
+  const iMax=t.indexOf(Math.max(...t)), iMin=t.indexOf(Math.min(...t));
+  const perks=['מקבל/ת את הסיבוב הראשון על חשבון {min} 🍺','בוחר/ת את השולחן הכי טוב 🪑','פטור/ה מלהגיע בזמן ⏰','בוחר/ת את הפלייליסט של הערב 🎶','{min} מזמין/ה צ׳ייסר 🥃'];
+  const k=Math.abs([...r.name].reduce((a,c)=>a+c.charCodeAt(0),0))%perks.length;
+  return `🏅 ${nm(ps[iMax],iMax)} נוסע/ת הכי הרבה (+${Math.round(r.spread)} ד׳), ולכן ${perks[k].replace('{min}', nm(ps[iMin],iMin))}`;
+}
+function confetti(){
+  const c=$('#confetti'), ctx=c.getContext('2d'); c.width=innerWidth*devicePixelRatio; c.height=innerHeight*devicePixelRatio;
+  ctx.scale(devicePixelRatio,devicePixelRatio);
+  const cols=['#ff5a36','#facc15','#22c55e','#2563eb','#db2777','#9333ea'];
+  const ps=Array.from({length:140},()=>({x:innerWidth/2+(Math.random()-.5)*80,y:innerHeight*.35,vx:(Math.random()-.5)*12,vy:-Math.random()*13-4,s:Math.random()*7+4,r:Math.random()*6,vr:(Math.random()-.5)*.3,c:cols[Math.floor(Math.random()*cols.length)]}));
+  let f=0; (function tick(){ ctx.clearRect(0,0,innerWidth,innerHeight);
+    ps.forEach(p=>{ p.vy+=.35; p.vx*=.99; p.x+=p.vx; p.y+=p.vy; p.r+=p.vr; ctx.save(); ctx.translate(p.x,p.y); ctx.rotate(p.r); ctx.fillStyle=p.c; ctx.fillRect(-p.s/2,-p.s/4,p.s,p.s/2); ctx.restore(); });
+    if(++f<150) requestAnimationFrame(tick); else ctx.clearRect(0,0,innerWidth,innerHeight); })();
+  try{ navigator.vibrate && navigator.vibrate([30,40,30]); }catch(e){}
+}
+let spinning=false;
+async function letFateDecide(){
+  if(spinning||!results.length) return; spinning=true;
+  const pool=Math.min(3, results.length);
+  // weighted toward fairer options
+  const w=results.slice(0,pool).map(r=>1/(r.score*r.score)); const tot=w.reduce((a,b)=>a+b,0);
+  let x=Math.random()*tot, target=0; for(let i=0;i<pool;i++){ x-=w[i]; if(x<=0){ target=i; break; } }
+  const steps = pool*4 + target + 1; const cards=[...document.querySelectorAll('.res')];
+  for(let s=0;s<steps;s++){
+    cards.forEach(c=>c.classList.remove('spin')); const i=s%pool; cards[i]?.classList.add('spin');
+    try{ navigator.vibrate && navigator.vibrate(8); }catch(e){}
+    await new Promise(r=>setTimeout(r, 70 + s*s*1.6));
+  }
+  cards.forEach(c=>c.classList.remove('spin'));
+  spinning=false;
+  await selectResult(target, false);
+  document.querySelectorAll('.res')[target]?.scrollIntoView({behavior:'smooth', block:'center'});
+  confetti(); toast(`הגורל החליט: ${results[target].name} 🎉`, 3500);
+}
 
 // ---------- results UI ----------
 function gmapsDir(v, mode){ return `https://www.google.com/maps/dir/?api=1&destination=${v.lat},${v.lon}&travelmode=${mode}`; }
@@ -446,6 +536,7 @@ function waText(v){
   lines.push(`https://www.google.com/maps/search/?api=1&query=${v.lat},${v.lon}`);
   lines.push('', 'זמני הגעה:');
   lastPs.forEach((p,i)=>lines.push(`${MODES[p.mode].icon} ${p.name||'משתתף '+(i+1)}: ${Math.round(v.times[i])} דק׳`));
+  lines.push('', verdict(v));
   lines.push('', `פער של ${Math.round(v.spread)} דק׳ בלבד בין כולם · נמצא עם "באמצע"`);
   return lines.join('\n');
 }
@@ -453,6 +544,9 @@ function renderResults(){
   const box=$('#results'); box.innerHTML='';
   if(!results.length) return;
   const h=document.createElement('h2'); h.textContent='ההצעות שלנו'; box.appendChild(h);
+  if(results.length>1){ const f=document.createElement('div'); f.className='fate';
+    f.innerHTML=`<button id="fateBtn">🎰 לא מצליחים להחליט? תנו לגורל</button>`; box.appendChild(f);
+    f.querySelector('button').onclick=letFateDecide; }
   const globalMax = Math.max(...results.map(r=>r.max));
   results.forEach((r,idx)=>{
     const el=document.createElement('div'); el.className='card res'+(idx===selectedIdx?' sel':'');
@@ -467,6 +561,7 @@ function renderResults(){
       <div class="times">${lastPs.map((p,i)=>`<span class="t"><span class="dot" style="background:${p.color};width:10px;height:10px"></span>${MODES[p.mode].icon} ${esc(p.name||'משתתף '+(i+1))} · <b>${fmtMin(r.times[i])}</b></span>`).join('')}</div>
       <div class="bar" title="טווח זמני ההגעה"><i style="left:${lo}%;width:${Math.max(hi-lo,2)}%"></i></div>
       <div class="summary">כולם מגיעים תוך <b>${fmtMin(r.max)}</b> · פער של <b>${fmtMin(r.spread)}</b> בין הראשון לאחרון</div>
+      <div class="verdict">${esc(verdict(r))}</div>
       <div class="actions">
         <a class="wa" href="https://wa.me/?text=${encodeURIComponent(waText(r))}" target="_blank" rel="noopener">שלח בוואטסאפ</a>
         <a href="https://www.google.com/maps/search/?api=1&query=${r.lat},${r.lon}" target="_blank" rel="noopener">פתח במפות</a>
@@ -490,6 +585,7 @@ async function selectResult(idx, scroll){
   if(scroll) window.scrollTo({top:0, behavior:'smooth'});
   const ps = lastPs;
   await Promise.all(ps.map(async p=>{
+    if(MODES[p.mode].profile==='transit'){ L.polyline([[p.lat,p.lon],[r.lat,r.lon]], {color:p.color, weight:3, dashArray:'2 8'}).addTo(layerRoutes); return; }
     try{
       const url = `${OSRM[MODES[p.mode].profile]}/route/v1/driving/${p.lon},${p.lat};${r.lon},${r.lat}?overview=simplified&geometries=geojson`;
       const j = await fetchJSON(url, {}, 15000);
