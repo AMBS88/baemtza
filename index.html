@@ -152,7 +152,7 @@ const OSRM = {
   bike:'https://routing.openstreetmap.de/routed-bike',
   car:'https://routing.openstreetmap.de/routed-car',
 };
-const OVERPASS = ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+const OVERPASS = ['https://overpass.openstreetmap.fr/api/interpreter','https://overpass-api.de/api/interpreter','https://maps.mail.ru/osm/tools/overpass/api/interpreter','https://overpass.private.coffee/api/interpreter'];
 const NOMINATIM = 'https://nominatim.openstreetmap.org';
 const TRANSITOUS = 'https://api.transitous.org/api';
 const TRANSIT_VERSIONS = ['v6','v5','v4','v3','v2','v1'];
@@ -381,13 +381,43 @@ function estimateCenter(ps){
 }
 
 async function overpass(center, radius, tags){
-  const q = `[out:json][timeout:25];nwr["amenity"~"^(${tags.join('|')})$"]["name"](around:${Math.round(radius)},${center.lat.toFixed(6)},${center.lon.toFixed(6)});out center tags 500;`;
-  let lastErr;
-  for(const ep of OVERPASS){
-    try{ const r = await fetchJSON(ep, {method:'POST', body:'data='+encodeURIComponent(q), headers:{'Content-Type':'application/x-www-form-urlencoded'}}, 30000); return r.elements||[]; }
-    catch(e){ lastErr=e; }
+  const q = `[out:json][timeout:20];nwr["amenity"~"^(${tags.join('|')})$"]["name"](around:${Math.round(radius)},${center.lat.toFixed(5)},${center.lon.toFixed(5)});out center tags 500;`;
+  const ckey = 'op:'+q; try{ const c=sessionStorage.getItem(ckey); if(c) return JSON.parse(c); }catch(e){}
+  // race all mirrors; first valid answer wins, the rest are cancelled
+  const ctls = OVERPASS.map(()=>new AbortController());
+  const tries = OVERPASS.map((ep,i)=>(async()=>{
+    const t=setTimeout(()=>ctls[i].abort(), 20000);
+    try{
+      const r = await fetch(ep+'?data='+encodeURIComponent(q), {signal:ctls[i].signal});
+      if(!r.ok) throw new Error('HTTP '+r.status);
+      const j = await r.json(); if(!Array.isArray(j.elements)) throw new Error('bad');
+      return j.elements;
+    } finally { clearTimeout(t); }
+  })());
+  try{
+    const els = await Promise.any(tries);
+    ctls.forEach(c=>c.abort());
+    try{ sessionStorage.setItem(ckey, JSON.stringify(els)); }catch(e){}
+    return els;
+  }catch(e){
+    return await nominatimVenues(center, radius, tags); // fallback
   }
-  throw lastErr || new Error('overpass');
+}
+async function nominatimVenues(center, radius, tags){
+  const dLat = radius/111320, dLon = radius/(111320*Math.cos(center.lat*Math.PI/180));
+  const vb = [center.lon-dLon, center.lat+dLat, center.lon+dLon, center.lat-dLat].map(x=>x.toFixed(5)).join(',');
+  const out = [];
+  for(const tag of tags){
+    try{
+      const r = await fetchJSON(`${NOMINATIM}/search?format=jsonv2&amenity=${tag}&viewbox=${vb}&bounded=1&limit=50&extratags=1&namedetails=1&addressdetails=1&accept-language=he`, {}, 12000);
+      r.forEach(x=>out.push({type:x.osm_type, id:x.osm_id, lat:+x.lat, lon:+x.lon, tags:{
+        amenity:x.type, name:(x.namedetails&&x.namedetails.name)||x.name, 'name:he':x.namedetails&&x.namedetails['name:he'],
+        opening_hours:x.extratags&&x.extratags.opening_hours, 'addr:street':x.address&&x.address.road, 'addr:housenumber':x.address&&x.address.house_number }}));
+    }catch(e){}
+    await new Promise(r=>setTimeout(r, 1100)); // Nominatim: max 1 request/second
+  }
+  if(!out.length) throw new Error('VENUES_DOWN');
+  return out;
 }
 function venueFromEl(el){
   const lat = el.lat ?? el.center?.lat, lon = el.lon ?? el.center?.lon; const t=el.tags||{};
@@ -415,7 +445,7 @@ async function osrmTable(profile, origins, dests){
 }
 
 async function transitReach(p){
-  const qs = `one=${p.lat.toFixed(6)},${p.lon.toFixed(6)}&maxTravelTime=75&time=${encodeURIComponent(new Date().toISOString())}`;
+  const qs = `one=${p.lat.toFixed(6)},${p.lon.toFixed(6)}&maxTravelTime=60&time=${encodeURIComponent(new Date().toISOString())}`;
   const versions = transitVersion ? [transitVersion] : TRANSIT_VERSIONS;
   let lastErr;
   for(const v of versions){
@@ -498,7 +528,8 @@ async function findPlaces(){
     console.error(e);
     if(e.message==='TRANSIT_NONE') status('לא נמצאה תחבורה ציבורית פעילה עכשיו (אולי שבת?). נסו אמצעי תחבורה אחר', true);
     else if(e.message==='TRANSIT_DOWN') status('שירות התחבורה הציבורית לא הגיב. נסו שוב או בחרו אמצעי תחבורה אחר', true);
-    else status('שירות המפות לא הגיב. נסו שוב בעוד רגע', true);
+    else if(e.message==='VENUES_DOWN') status('שירותי חיפוש המקומות עמוסים כרגע. נסו שוב בעוד דקה', true);
+    else status('שירות המסלולים לא הגיב. נסו שוב בעוד רגע', true);
   }finally{ btn.disabled=false; }
 }
 let lastPs = [], lastGrid = null;
